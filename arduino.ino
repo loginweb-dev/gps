@@ -49,7 +49,7 @@ TinyGsm modem(SerialAT);
 #define LED_PIN             12
 
 
-#define SMS_TARGET  "+59172823861"
+//#define SMS_TARGET  "+59172823861"
 
 void enableGPS(void)
 {
@@ -126,28 +126,34 @@ void setup()
     SerialAT.begin(UART_BAUD, SERIAL_8N1, PIN_RX, PIN_TX);
 
 
-    Serial.println("/**********************************************************/");
-    Serial.println("To initialize the network test, please make sure your LET ");
-    Serial.println("antenna has been connected to the SIM interface on the board.");
-    Serial.println("/**********************************************************/\n\n");
+//    Serial.println("/**********************************************************/");
+//    Serial.println("To initialize the network test, please make sure your LET ");
+//    Serial.println("antenna has been connected to the SIM interface on the board.");
+//    Serial.println("/**********************************************************/\n\n");
 
-    delay(10000);
-//    AT+CMGS="+59172823861"
-//    modem.sendAT("AT+CMGF=1");
-//    Serial.println("AT+CMGS=+59172823861");
+  delay(5000);
+  Serial.println("/**********************************************************/");
+  Serial.println("Preparando para recivir sms");
+  Serial.println("/**********************************************************/");
+  String response;
+  modem.sendAT("ATE0");
+  modem.waitResponse(1000L, response);
+  Serial.println(response);
+  modem.sendAT("+CMGF=1");
+  modem.waitResponse(1000L, response);
+  Serial.println(response);
+  modem.sendAT("+CNMI=1,2,0,0");
+  modem.waitResponse(1000L, response);
+  Serial.println(response);
+  delay(5000);
 }
 
+String msg = "";
+String smsStatus = "";
+String senderNumber = "";
+String receivedDate = "";
 void loop()
 {
-
-   int i = Serial.parseInt();
-  Serial.print("Reading message at :- ");Serial.println(i);
-  String SMS=modem.readSMS(i);
-  String ID=modem.getSenderID(i);
-  Serial.print("Message From : ");Serial.println(ID);
-  Serial.println(" and the message is ");
-  Serial.println(SMS);
-  
     String res;
 
     Serial.println("========INIT========");
@@ -245,9 +251,7 @@ void loop()
 
     Serial.println("Start positioning . Make sure to locate outdoors.");
     Serial.println("The blue indicator light flashes to indicate positioning."); 
-    
     enableGPS();
-
     float lat,  lon;
     while (1) {
         if (modem.getGPS(&lat, &lon)) {
@@ -257,41 +261,57 @@ void loop()
             break;
         }
         digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-        delay(1000);
+        delay(500);
     }
-
     disableGPS();
-    
-
-
-    Serial.println("/**********************************************************/");
-    Serial.println("Enviando SMS al # +59172823861");
-    Serial.println("/**********************************************************/\n");
-    
-    // --------TESTING SENDING SMS--------
-    String imei = modem.getIMEI();
-    String ccid = modem.getSimCCID();
-    String cop = modem.getOperator();
-    String mapa = "https://maps.google.com/maps?q=loc:"+String(lat)+","+String(lon);
-    Serial.println(mapa);
-    res = modem.sendSMS(SMS_TARGET, String("Hola, mensaje desde tu GPS\n IMEI:") + imei+ String("\n SSID: ")+ ccid + String("\n OPERADOR: ")+ cop + String("\n LATITUD: ") + lat + String("\n LONGITUD: ")+ lon);
-    //    DBG("SMS:", res ? "OK" : "fail");
-    if(res == "1"){
-        Serial.println("Mensaje enviado");
-      }else{
-          Serial.println("Mensaje NO enviado ERROR");
-      }
-
 
     Serial.println("/**********************************************************/");
     Serial.println("After the network test is complete, please enter the  ");
     Serial.println("AT command in the serial terminal.");
-    Serial.println("/**********************************************************/\n");
+    Serial.println("/**********************************************************/");
 
     while (1) {
         while (SerialAT.available()) {
-//            Serial.println(SerialAT.read());
             SerialMon.write(SerialAT.read());
+            String mymessage = SerialAT.readString();
+            res = "";
+            delay(500);
+            String phoneint = mymessage.substring(8, 16);
+            if(mymessage.indexOf("MAPA")>=0){              
+              Serial.println("Empezar a posicionar. Asegúrese de ubicar al aire libre.");
+              Serial.println("La luz indicadora azul parpadea para indicar el posicionamiento."); 
+              enableGPS();
+              while (1) {
+                  if (modem.getGPS(&lat, &lon)) {
+                    String mapa = "https://maps.google.com/maps?q=loc:"+String(lat)+","+String(lon);
+                    res = modem.sendSMS("+591"+phoneint, mapa);
+                    if(res == "1"){
+                      Serial.println("Mensaje enviado "+phoneint);
+                    }else{
+                        Serial.println("Mensaje NO enviado ERROR");
+                    }
+                    Serial.println("La ubicación ha sido bloqueada, la latitud y la longitud son:");
+                    Serial.print("latitude:"); Serial.println(lat);
+                    Serial.print("longitude:"); Serial.println(lon);
+                    break;
+                  }
+                  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+                  delay(500);
+              }
+              disableGPS();
+            }else if(mymessage.indexOf("INFO")>=0){
+              String imei = modem.getIMEI();
+              String ccid = modem.getSimCCID();
+              String cop = modem.getOperator();
+              res = modem.sendSMS("+591"+phoneint, "Datos de GPS \nImei: "+imei+"\nCCID: "+ccid+"\nOPERADOR: "+cop+"\nPropietario: Ing. Percy Alvarez \nNumero: +591 67353115");
+              if(res == "1"){
+                Serial.println("Mensaje enviado: "+phoneint);
+              }else{
+                  Serial.println("Mensaje NO enviado ERROR");
+              }
+            }else{
+               Serial.println("No envio ninguna palabra clave");
+            }
         }
         while (SerialMon.available()) {
             SerialAT.write(SerialMon.read());
