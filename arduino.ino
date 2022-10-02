@@ -148,10 +148,6 @@ void setup()
   delay(5000);
 }
 
-String msg = "";
-String smsStatus = "";
-String senderNumber = "";
-String receivedDate = "";
 void loop()
 {
     String res;
@@ -264,7 +260,8 @@ void loop()
         delay(500);
     }
     disableGPS();
-
+    digitalWrite(LED_PIN, LOW);
+    
     Serial.println("/**********************************************************/");
     Serial.println("After the network test is complete, please enter the  ");
     Serial.println("AT command in the serial terminal.");
@@ -277,6 +274,8 @@ void loop()
             res = "";
             delay(500);
             String phoneint = mymessage.substring(8, 16);
+            mymessage.toUpperCase();
+            Serial.println(mymessage);
             if(mymessage.indexOf("MAPA")>=0){              
               Serial.println("Empezar a posicionar. Asegúrese de ubicar al aire libre.");
               Serial.println("La luz indicadora azul parpadea para indicar el posicionamiento."); 
@@ -286,7 +285,7 @@ void loop()
                     String mapa = "https://maps.google.com/maps?q=loc:"+String(lat)+","+String(lon);
                     res = modem.sendSMS("+591"+phoneint, mapa);
                     if(res == "1"){
-                      Serial.println("Mensaje enviado "+phoneint);
+                      Serial.println("Mensaje enviado a "+phoneint);
                     }else{
                         Serial.println("Mensaje NO enviado ERROR");
                     }
@@ -299,18 +298,49 @@ void loop()
                   delay(500);
               }
               disableGPS();
+              digitalWrite(LED_PIN, LOW);
             }else if(mymessage.indexOf("INFO")>=0){
               String imei = modem.getIMEI();
               String ccid = modem.getSimCCID();
               String cop = modem.getOperator();
-              res = modem.sendSMS("+591"+phoneint, "Datos de GPS \nImei: "+imei+"\nCCID: "+ccid+"\nOPERADOR: "+cop+"\nPropietario: Ing. Percy Alvarez \nNumero: +591 67353115");
+              res = modem.sendSMS("+591"+phoneint, "Datos de Dispocitivo \nImei: "+imei+"\nCCID: "+ccid+"\nOPERADOR: "+cop+"\nPropietario: Ing. Percy Alvarez \nNumero: +591 67353115");
               if(res == "1"){
-                Serial.println("Mensaje enviado: "+phoneint);
+                Serial.println("Mensaje enviado a "+phoneint);
               }else{
                   Serial.println("Mensaje NO enviado ERROR");
               }
+            }else if(mymessage.indexOf("GPS")>=0){
+              enableGPS();
+              while (1) {
+                if (modem.getGPS(&lat, &lon)) {                
+                  String gps_raw = modem.getGPSraw();
+                  Serial.println(gps_raw);
+                  if (gps_raw != "") {
+                    res = modem.sendSMS("+591"+phoneint, "DATOS DE GPS: \n"+gps_raw);
+                    if(res == "1"){
+                      Serial.println("Mensaje enviado a "+phoneint);
+                    }else{
+                        Serial.println("Mensaje NO enviado ERROR");
+                    }
+                  }
+                  break;
+                }
+                  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+                  delay(500);
+              }
+              disableGPS();
+              digitalWrite(LED_PIN, LOW);
+            }else if(mymessage.indexOf("LED")>=0){
+              digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+              Serial.println(digitalRead(LED_PIN));
             }else{
-               Serial.println("No envio ninguna palabra clave");
+              Serial.println("No envio ninguna palabra clave, intenta con las siguientes palabras:\n1.- Info\n2.- Mapa\n3.- Gps\n4.- Led");
+              res = modem.sendSMS("+591"+phoneint, "No envio ninguna palabra clave, intenta con las siguientes palabras:\n1.- Info\n2.- Mapa\n3.- Gps\n4.- Led");
+              if(res == "1"){
+                Serial.println("Mensaje enviado a "+phoneint);
+              }else{
+                  Serial.println("Mensaje NO enviado ERROR");
+              }
             }
         }
         while (SerialMon.available()) {
