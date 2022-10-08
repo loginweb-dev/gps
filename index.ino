@@ -121,21 +121,23 @@ void setup() {
   }
   SerialMon.println(" success");
   if (modem.isGprsConnected()) { SerialMon.println("GPRS connected"); }
+
+  set_setting(modem.getIMEI());
   
 }
 float milat,  milon, mispeed, mialt, miaccuracy;
 int   vsat2, usat2;
 int mitiempo = 3000; //seg
 int geocerca = 3;  //kmph
+#define TIEMPO 3000
+#define GEOCERCA 3
 void loop() {
-
   while (SerialAT.available()) {
     SerialMon.write(SerialAT.read());
   }
   while (SerialMon.available()) {
       SerialAT.write(SerialMon.read());
   }
-
     Serial.println("Empezar a posicionar. Asegúrese de ubicar al aire libre.");
     Serial.println("La luz indicadora azul parpadea para indicar el posicionamiento."); 
     enableGPS();
@@ -151,7 +153,7 @@ void loop() {
             String gps_raw = modem.getGPSraw();
             Serial.println(gps_raw);
             if(mispeed > geocerca){
-              enviar_punto(modem.getIMEI(), milat, milon, mispeed);
+              enviar_punto(modem.getIMEI(), milat, milon, mispeed, mialt);
             }
             break;
         }
@@ -159,10 +161,10 @@ void loop() {
         delay(500);
     }
     delay(mitiempo); // 1 seg
-
 }
 
-void enviar_punto(String imei, float latitud, float longitud, float velocidad){
+void set_setting(String imei){
+//  StaticJsonDocument<200> doc;
   SerialMon.print("Connecting to ");
   SerialMon.println(server);
   if (!client.connect(server, 80)) {
@@ -171,7 +173,93 @@ void enviar_punto(String imei, float latitud, float longitud, float velocidad){
     return;
   }
   SerialMon.println(" success");
-  String miresource = "/api/save?imei="+imei+"&lat="+String(latitud, 8)+"&long="+String(longitud, 8)+"&spped="+velocidad;
+  String miresource = "/api/devices/get?imei="+imei;
+  Serial.println(miresource);
+  SerialMon.println("Performing HTTP POST request...");
+//  client.println(F("POST /api/devices/get?imei=869951034480511 HTTP/1.0"));
+//  client.println(F("Host: igps.live"));
+//  client.println(F("Connection: close"));
+  
+//  client.print(String("GET ") + miresource + " HTTP/1.1\r\n");
+//  client.print(String("Host: ") + server + "\r\n");
+//  client.print("Content-Type application/json\r\n");
+//  client.print("Connection: close\r\n\r\n");
+//  client.println();
+//  Serial.println(client.read());
+//  uint32_t timeout = millis();
+//  while (client.connected() && millis() - timeout < 10000L) {
+//    while (client.available()) {
+//      char c = client.read();
+//      SerialMon.print(c);
+//      timeout = millis();
+//    }
+//  }
+//  SerialMon.println();
+
+
+  client.println(F("GET /example.json HTTP/1.0"));
+  client.println(F("Host: arduinojson.org"));
+  client.println(F("Connection: close"));
+
+    if (client.println() == 0) {
+      Serial.println(F("Failed to send request"));
+//      client.stop();
+//      return;
+    }
+  
+// // Check HTTP status
+  char status[32] = {0};
+  client.readBytesUntil('\r', status, sizeof(status));
+  if (strcmp(status + 9, "HTTP/1.1 200 OK") != 0) {
+    Serial.print(F("Unexpected response: "));
+    Serial.println(status);
+//    client.stop();
+//    return;
+  }
+  Serial.println(strcmp(status + 9, "HTTP/1.1 200 OK"));
+//
+//
+//    // Skip HTTP headers
+  char endOfHeaders[] = "\r\n\r\n";
+  if (!client.find(endOfHeaders)) {
+    Serial.println(F("Invalid response"));
+//    client.stop();
+//    return;
+  }
+//
+  const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_ARRAY_SIZE(2) + 60;
+  DynamicJsonDocument doc(capacity);
+  Serial.println(capacity);
+  // Parse JSON object
+  DeserializationError error = deserializeJson(doc, client);
+  if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+//    client.stop();
+//    return;
+  }
+  Serial.println(F("Response:"));
+  Serial.println(doc["sensor"].as<const char*>());
+  Serial.println(doc["time"].as<long>());
+  Serial.println(doc["data"][0].as<float>(), 6);
+  Serial.println(doc["data"][1].as<float>(), 6);
+
+//  Serial.println(doc);
+    
+  client.stop();
+  SerialMon.println(F("Server disconnected"));
+    
+}
+void enviar_punto(String imei, float latitud, float longitud, float velocidad, float altura){
+  SerialMon.print("Connecting to ");
+  SerialMon.println(server);
+  if (!client.connect(server, 80)) {
+    SerialMon.println(" fail");
+    delay(10000);
+    return;
+  }
+  SerialMon.println(" success");
+  String miresource = "/api/waypoints/save?imei="+imei+"&lat="+String(latitud, 8)+"&long="+String(longitud, 8)+"&speed="+velocidad+"&height="+altura;
   Serial.println(miresource);
   SerialMon.println("Performing HTTP POST request...");
   client.print(String("POST ") + miresource + " HTTP/1.1\r\n");
