@@ -9,23 +9,17 @@
 #define TINY_GSM_RX_BUFFER 1024 // Set RX buffer to 1Kb
 #define SerialAT Serial1
 
-// See all AT commands, if wanted
-// #define DUMP_AT_COMMANDS
-
-// set GSM PIN, if any
-#define GSM_PIN ""
-
 // Your GPRS credentials, if any
 const char apn[]  = "4g.entel";     //SET TO YOUR APN
 const char gprsUser[] = "";
 const char gprsPass[] = "";
 
+#include <WiFi.h>
 #include <TinyGsmClient.h>
-#include <SPI.h>
-#include <SD.h>
-#include <Ticker.h>
-#include <ArduinoHttpClient.h>
 //#include <HTTPClient.h>
+#include <ArduinoHttpClient.h>   
+#include <ArduinoJson.h>
+//#include <ArduinoJson.hpp>
 
 #ifdef DUMP_AT_COMMANDS
 #include <StreamDebugger.h>
@@ -44,21 +38,10 @@ TinyGsm modem(SerialAT);
 #define PIN_TX              27
 #define PIN_RX              26
 #define PWR_PIN             4
-
-#define SD_MISO             2
-#define SD_MOSI             15
-#define SD_SCLK             14
-#define SD_CS               13
 #define LED_PIN             12
-
-
-//#define SMS_TARGET  "+59172823861"
 
 void enableGPS(void)
 {
-    // Set SIM7000G GPIO4 LOW ,turn on GPS power
-    // CMD:AT+SGPIO=0,4,1,1
-    // Only in version 20200415 is there a function to control GPS power
     modem.sendAT("+SGPIO=0,4,1,1");
     if (modem.waitResponse(10000L) != 1) {
         DBG(" SGPIO=0,4,1,1 false ");
@@ -68,9 +51,6 @@ void enableGPS(void)
 
 void disableGPS(void)
 {
-    // Set SIM7000G GPIO4 LOW ,turn off GPS power
-    // CMD:AT+SGPIO=0,4,1,0
-    // Only in version 20200415 is there a function to control GPS power
     modem.sendAT("+SGPIO=0,4,1,0");
     if (modem.waitResponse(10000L) != 1) {
         DBG(" SGPIO=0,4,1,0 false ");
@@ -105,6 +85,7 @@ void modemRestart()
 String res;
 float lat,  lon;
 int count = 0;
+TinyGsmClient  client(modem);
 void setup()
 {
     // Set console baud rate
@@ -118,25 +99,27 @@ void setup()
 
     modemPowerOn();
     enableGPS();
+    SerialAT.begin(UART_BAUD, SERIAL_8N1, PIN_RX, PIN_TX);
     
     Serial.println("/**********************************************************/");
     Serial.println("Para inicializar la prueba de red, asegúrese de que su LET ");
     Serial.println("la antena se ha conectado a la interfaz SIM en la placa.");
     Serial.println("/**********************************************************/\n");
-    
-    Serial.println("========SDCard Detect.======");
-    SPI.begin(SD_SCLK, SD_MISO, SD_MOSI);
-    if (!SD.begin(SD_CS)) {
-        Serial.println("SDCard MOUNT FAIL");
-    } else {
-        uint32_t cardSize = SD.cardSize() / (1024 * 1024);
-        String str = "SDCard Size: " + String(cardSize) + "MB";
-        Serial.println(str);
-    }
-    Serial.println("===========================");
 
-    SerialAT.begin(UART_BAUD, SERIAL_8N1, PIN_RX, PIN_TX);
-
+     SerialMon.print("Connecting to ");
+      SerialMon.print(apn);
+      if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
+        SerialMon.println(F(" [fail]"));
+        SerialMon.println(F("************************"));
+        SerialMon.println(F(" Is GPRS enabled by network provider?"));
+        SerialMon.println(F(" Try checking your card balance."));
+        SerialMon.println(F("************************"));
+        delay(10000);
+        Serial.println(".");
+        return;
+      }
+      SerialMon.println(F(" [OK]"));
+  
     delay(5000);
     Serial.println("/**********************************************************/");
     Serial.println("Preparando para recivir sms");
@@ -161,89 +144,6 @@ void setup()
         Serial.println("Failed to restart modem, attempting to continue without restarting");
         return;
     }
-
-    Serial.println("========SIMCOMATI======");
-    modem.sendAT("+SIMCOMATI");
-    modem.waitResponse(1000L, res);
-    res.replace(GSM_NL "OK" GSM_NL, "");
-    Serial.println(res);
-    res = "";
-    Serial.println("=======================");
-
-    Serial.println("=====Preferred mode selection=====");
-    modem.sendAT("+CNMP?");
-    if (modem.waitResponse(1000L, res) == 1) {
-        res.replace(GSM_NL "OK" GSM_NL, "");
-        Serial.println(res);
-    }
-    res = "";
-    Serial.println("=======================");
-
-
-    Serial.println("=====Preferred selection between CAT-M and NB-IoT=====");
-    modem.sendAT("+CMNB?");
-    if (modem.waitResponse(1000L, res) == 1) {
-        res.replace(GSM_NL "OK" GSM_NL, "");
-        Serial.println(res);
-    }
-    res = "";
-    Serial.println("=======================");
-
-
-    String name = modem.getModemName();
-    Serial.println("Modem Name: " + name);
-
-    String modemInfo = modem.getModemInfo();
-    Serial.println("Modem Info: " + modemInfo);
-
-    // Unlock your SIM card with a PIN if needed
-    if ( GSM_PIN && modem.getSimStatus() != 3 ) {
-        modem.simUnlock(GSM_PIN);
-    }
-
-
-    for (int i = 0; i <= 4; i++) {
-        uint8_t network[] = {
-            2,  /*Automatic*/
-            13, /*GSM only*/
-            38, /*LTE only*/
-            51  /*GSM and LTE only*/
-        };
-        Serial.printf("Try %d method\n", network[i]);
-        modem.setNetworkMode(network[i]);
-        delay(3000);
-        bool isConnected = false;
-        int tryCount = 60;
-        while (tryCount--) {
-            int16_t signal =  modem.getSignalQuality();
-            Serial.print("Signal: ");
-            Serial.print(signal);
-            Serial.print(" ");
-            Serial.print("isNetworkConnected: ");
-            isConnected = modem.isNetworkConnected();
-            Serial.println( isConnected ? "CONNECT" : "NO CONNECT");
-            if (isConnected) {
-                break;
-            }
-            delay(1000);
-            digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-        }
-        if (isConnected) {
-            break;
-        }
-    }
-
-    Serial.println();
-    Serial.println("Device is connected .");
-    Serial.println();
-
-    Serial.println("=====Inquiring UE system information=====");
-    modem.sendAT("+CPSI?");
-    if (modem.waitResponse(1000L, res) == 1) {
-        res.replace(GSM_NL "OK" GSM_NL, "");
-        Serial.println(res);
-    }
-
 
     Serial.println("Empezar a posicionar. Asegúrese de ubicar al aire libre.");
     Serial.println("La luz indicadora azul parpadea para indicar el posicionamiento."); 
@@ -349,7 +249,49 @@ void loop()
       Serial.print("latitude: "); Serial.println(lat);
       Serial.print("longitude: "); Serial.println(lon);
       Serial.print("count: "); Serial.println(count);
+//      httPost("65465465847", lat, lon);
     }
     delay(9000);
     count +=1;
+}
+
+
+void httPost(String imei, float latitud, float longitud) {
+  DynamicJsonDocument doc(512);
+  doc["imei"] = imei;
+  doc["latitud"] = latitud;
+  doc["longitud"] = longitud;
+  char jsonBuffer[512];
+  serializeJson(doc, jsonBuffer);
+  Serial.println(jsonBuffer);
+
+  HttpClient WeatherAPI = HttpClient(client, "igps.loginweb.dev/api/waypoints/store", 80);
+//  WeatherAPI.get("/api/waypoints/store?imei=" + imei + "&latitud=" + latitud + "&longitud=" + longitud);
+//  int len = measureJson(jsonBuffer);
+//    WeatherAPI.addHeader("Content-Type", "application/json");
+//  WeatherAPI.connectionKeepAlive(); 
+    WeatherAPI.post("/", "application/json", jsonBuffer);
+  // read the status code and body of the response
+  int statusCode = WeatherAPI.responseStatusCode();
+  String response = WeatherAPI.responseBody();
+  Serial.println("-------------------------------------");
+  Serial.print("Status code: ");
+  Serial.println(statusCode);
+  Serial.print("Response: ");
+  Serial.println(response);
+   Serial.println("-------------------------------------");
+  
+//  HTTPClient httPost = HttpClient();
+//  httPost.begin("https://igps.loginweb.dev/api/waypoints/store");
+//  httPost.addHeader("Content-Type", "application/json");
+//  int httpResponceCode = httPost.POST(jsonBuffer);
+//  if (httpResponceCode > 0) {
+//    String response = httPost.getString();
+//    Serial.println(httpResponceCode);
+//    Serial.println(response);
+//  } else {
+//    Serial.print("err:");
+//    Serial.println(httpResponceCode);
+//  }
+//  httPost.end();
 }

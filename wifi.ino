@@ -1,16 +1,12 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-//#define HOST "http://4154d15d.ngrok.io"
 
 const char* ssid       = "admin";
 const char* password   = "password";
 
-//StaticJsonDocument<200> doc;
-//StaticJsonDocument<200> postJson;
 void setup()
 {
-
   Serial.begin(115200);
   Serial.printf("Connecting to %s ", ssid);
   WiFi.begin(ssid, password);
@@ -20,7 +16,7 @@ void setup()
   }
   Serial.println(" CONNECTED");
 //  httpGet();
-  httPost();
+  httPost("asdfasdfas", -14.65654684, -64.654454);
 }
 
 void loop(){
@@ -45,11 +41,18 @@ void httpGet() {
   }
 }
 
-void httPost() {
+void httPost(String imei, float latitud, float longitud) {
+  DynamicJsonDocument doc(512);
+  doc["imei"] = imei;
+  doc["latitud"] = latitud;
+  doc["longitud"] = longitud;
+  char jsonBuffer[512];
+  serializeJson(doc, jsonBuffer);
+  Serial.println(jsonBuffer);
   HTTPClient httPost;
   httPost.begin("https://igps.loginweb.dev/api/waypoints/store");
   httPost.addHeader("Content-Type", "application/json");
-  int httpResponceCode = httPost.POST("{\n\"imei\":\"684684684\", \n\"latitud\":\"-14.54545\", \n\"longitud\":\"-64.54684\"}");
+  int httpResponceCode = httPost.POST(jsonBuffer);
   if (httpResponceCode > 0) {
     String response = httPost.getString();
     Serial.println(httpResponceCode);
@@ -59,5 +62,4 @@ void httPost() {
     Serial.println(httpResponceCode);
   }
   httPost.end();
-
 }

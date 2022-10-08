@@ -52,5 +52,10 @@ void setup() {
 }
 
 void loop() {
-
+  while (SerialAT.available()) {
+    SerialMon.write(SerialAT.read());
+  }
+  while (SerialMon.available()) {
+      SerialAT.write(SerialMon.read());
+  }
 }
