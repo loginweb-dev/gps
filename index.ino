@@ -1,4 +1,5 @@
- #define TINY_GSM_MODEM_SIM7000
+
+#define TINY_GSM_MODEM_SIM7000
 
 #define SerialMon Serial
 
@@ -18,6 +19,13 @@ SoftwareSerial SerialAT(26, 27);  // RX, TX
 // Your GPRS credentials, if any
 const char apn[]      = "4g.entel";
 
+// Your WiFi connection credentials, if applicable
+const char wifiSSID[] = "admin";
+const char wifiPass[] = "password";
+
+#define TINY_GSM_USE_GPRS true
+#define TINY_GSM_USE_WIFI false
+
 // Server details
 const char server[]   = "igps.live";
 
@@ -31,6 +39,8 @@ const char server[]   = "igps.live";
 
 #include <TinyGsmClient.h>
 #include <ArduinoJson.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 
 #ifdef DUMP_AT_COMMANDS
 #include <StreamDebugger.h>
@@ -104,36 +114,144 @@ void setup() {
   SerialMon.print("Modem Info: ");
   SerialMon.println(modemInfo);
 
-  SerialMon.print("Waiting for network...");
-  if (!modem.waitForNetwork()) {
-    SerialMon.println(" fail");
-    delay(10000);
-    return;
-  }
+    Serial.println("/**********************************************************/");
+    Serial.println("Preparando para recivir sms");
+    Serial.println("/**********************************************************/");
+    String response;
+    modem.sendAT("ATE0");
+    modem.waitResponse(1000L, response);
+    Serial.println(response);
+    modem.sendAT("+CMGF=1");
+    modem.waitResponse(1000L, response);
+    Serial.println(response);
+    modem.sendAT("+CNMI=1,2,0,0");
+    modem.waitResponse(1000L, response);
+    Serial.println(response);
+    delay(5000);
+    
+ 
+  #if TINY_GSM_USE_GPRS
+    // GPRS connection parameters are usually set after network registration
+    SerialMon.print(F("Connecting to "));
+    SerialMon.print(apn);
+    if (!modem.gprsConnect(apn)) {
+      SerialMon.println(" fail");
+      delay(10000);
+      return;
+    }
+    SerialMon.println(" success");
+    if (modem.isGprsConnected()) { SerialMon.println("GPRS connected"); }
+     SerialMon.print("Waiting for network...");
+      if (!modem.waitForNetwork()) {
+        SerialMon.println(" fail");
+        delay(10000);
+        return;
+      }
+    set_setting_gprs(modem.getIMEI());
+  #endif
 
-  // GPRS connection parameters are usually set after network registration
-  SerialMon.print(F("Connecting to "));
-  SerialMon.print(apn);
-  if (!modem.gprsConnect(apn)) {
-    SerialMon.println(" fail");
-    delay(10000);
-    return;
-  }
-  SerialMon.println(" success");
-  if (modem.isGprsConnected()) { SerialMon.println("GPRS connected"); }
-
-  set_setting(modem.getIMEI());
+  #if TINY_GSM_USE_WIFI
+    // Wifi connection parameters must be set before waiting for the network
+     Serial.printf("Connecting to %s ", wifiSSID);
+     WiFi.begin(wifiSSID, wifiPass);
+     while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+     }
+     Serial.println(" CONNECTED");
+     set_setting_wifi(modem.getIMEI());
+  #endif  
   
 }
+
+//Variables globales
 float milat,  milon, mispeed, mialt, miaccuracy;
-int   vsat2, usat2;
-int mitiempo = 3000; //seg
+int vsat2, usat2;
+long mitiempo = 3000; //seg
 int geocerca = 3;  //kmph
-#define TIEMPO 3000
-#define GEOCERCA 3
+int velocidad_max = 40;
+String num_cliente = "72823861";
+String num_gps = "67353115";
+String name_cliente = "Ing. Percy Alvarez";
+String res = "";
 void loop() {
   while (SerialAT.available()) {
     SerialMon.write(SerialAT.read());
+     String mymessage = SerialAT.readString();
+     String phoneint = mymessage.substring(8, 16);
+     res = "";
+     mymessage.toUpperCase();
+             if(mymessage.indexOf("MAPA")>=0){              
+              Serial.println("Empezar a posicionar. Asegúrese de ubicar al aire libre.");
+              Serial.println("La luz indicadora azul parpadea para indicar el posicionamiento."); 
+              while (1) {
+                  if (modem.getGPS(&milat, &milon)) {
+                    String mapa = "https://maps.google.com/maps?q=loc:"+String(milat, 8)+","+String(milon, 8);
+                    res = modem.sendSMS("+591"+phoneint, mapa);
+                     Serial.println("/**********************************************************/");
+                    if(res == "1"){
+                      Serial.println("Mensaje enviado a "+phoneint);
+                    }else{
+                         Serial.println("Mensaje NO enviado ERROR a :"+ phoneint);
+                    }
+                     Serial.println("/**********************************************************/");
+                    Serial.println("La ubicación ha sido bloqueada, la latitud y la longitud son:");
+                    Serial.print("latitude:"); Serial.println(milat, 8);
+                    Serial.print("longitude:"); Serial.println(milon, 8);
+                    break;
+                  }
+                  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+                  delay(500);
+              }
+              digitalWrite(LED_PIN, LOW);
+            }else if(mymessage.indexOf("INFO")>=0){
+              String imei = modem.getIMEI();
+              String ccid = modem.getSimCCID();
+              String cop = modem.getOperator();
+              res = modem.sendSMS("+591"+phoneint, "Imei: "+imei+"\nOPERADOR: "+cop+"\nPropietario: "+name_cliente+"\nNumero Prop: "+num_cliente+"\nNumero GPS: "+num_gps+"\nVel. Max.: "+velocidad_max);
+               Serial.println("/**********************************************************/");
+              if(res == "1"){
+                Serial.println("Mensaje enviado a "+phoneint);
+              }else{
+                  Serial.println("Mensaje NO enviado ERROR a :"+ phoneint);
+              }
+               Serial.println("/**********************************************************/");
+            }else if(mymessage.indexOf("GPS")>=0){
+              while (1) {
+                if (modem.getGPS(&milat, &milon)) {                
+                  String gps_raw = modem.getGPSraw();
+                  Serial.println(gps_raw);
+                  if (gps_raw != "") {
+                    res = modem.sendSMS("+591"+phoneint, "DATOS DE GPS: \n"+gps_raw);
+                        Serial.println("/**********************************************************/");
+                    if(res == "1"){
+                      Serial.println("Mensaje enviado a "+phoneint);
+                    }else{
+                        Serial.println("Mensaje NO enviado ERROR a :"+ phoneint);
+                    }
+                        Serial.println("/**********************************************************/");
+                  }
+                  break;
+                }
+                  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+                  delay(500);
+              }
+              digitalWrite(LED_PIN, LOW);
+            }else if(mymessage.indexOf("LED")>=0){
+              digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+              Serial.println(digitalRead(LED_PIN));
+            }else{
+              Serial.println("No envio ninguna palabra clave, intenta con las siguientes palabras:\n1.- Info\n2.- Mapa\n3.- Gps\n4.- Led");
+              res = modem.sendSMS("+591"+phoneint, "No envio ninguna palabra clave, intenta con las siguientes palabras:\n1.- Info\n2.- Mapa\n3.- Gps\n4.- Switch, \n5.- Mas");
+               Serial.println("/**********************************************************/");
+              if(res == "1"){
+                Serial.println("Mensaje enviado a "+phoneint);
+              }else{
+                   Serial.println("Mensaje NO enviado ERROR a :"+ phoneint);
+              }
+               Serial.println("/**********************************************************/");
+               break;
+            }
   }
   while (SerialMon.available()) {
       SerialAT.write(SerialMon.read());
@@ -153,18 +271,55 @@ void loop() {
             String gps_raw = modem.getGPSraw();
             Serial.println(gps_raw);
             if(mispeed > geocerca){
-              enviar_punto(modem.getIMEI(), milat, milon, mispeed, mialt);
+                #if TINY_GSM_USE_WIFI
+                  
+                #endif                  
+                #if TINY_GSM_USE_GPRS
+                  enviar_punto(modem.getIMEI(), milat, milon, mispeed, mialt);
+                #endif  
             }
+
+              if(mispeed > velocidad_max ){
+               res = modem.sendSMS("+591"+num_cliente, "Mensaje de alerte, supero la velocidad maxima establecia cual es: "+String(mispeed));
+                if(res == "1"){
+                  Serial.println("Mensaje enviado a "+num_cliente);
+                }else{
+                    Serial.println("Mensaje NO enviado ERROR");
+                }
+              }
             break;
         }
         digitalWrite(LED_PIN, !digitalRead(LED_PIN));
         delay(500);
     }
-    delay(mitiempo); // 1 seg
+    delay(mitiempo); // 3 seg
 }
 
-void set_setting(String imei){
-//  StaticJsonDocument<200> doc;
+void set_setting_wifi(String imei){
+    HTTPClient http;
+    http.begin("http://igps.live/api/devices/get?imei="+imei);
+    delay(10000);
+    int httpResponceCode = http.GET();
+    if (httpResponceCode > 0) {
+      String response = http.getString();
+      Serial.println(httpResponceCode);
+      Serial.println(response);
+      DynamicJsonDocument doc(1024);
+      deserializeJson(doc, response);
+
+      mitiempo = doc["delay"];
+      geocerca = doc["geocerca"];
+      velocidad_max = doc["velocidad_max"];
+      Serial.println(mitiempo + geocerca + velocidad_max);
+      
+    } else {
+      Serial.print("err:");
+      Serial.println(httpResponceCode);
+    }
+    http.end(); 
+}
+
+void set_setting_gprs(String imei){
   SerialMon.print("Connecting to ");
   SerialMon.println(server);
   if (!client.connect(server, 80)) {
@@ -173,83 +328,10 @@ void set_setting(String imei){
     return;
   }
   SerialMon.println(" success");
-  String miresource = "/api/devices/get?imei="+imei;
-  Serial.println(miresource);
-  SerialMon.println("Performing HTTP POST request...");
-//  client.println(F("POST /api/devices/get?imei=869951034480511 HTTP/1.0"));
-//  client.println(F("Host: igps.live"));
-//  client.println(F("Connection: close"));
-  
-//  client.print(String("GET ") + miresource + " HTTP/1.1\r\n");
-//  client.print(String("Host: ") + server + "\r\n");
-//  client.print("Content-Type application/json\r\n");
-//  client.print("Connection: close\r\n\r\n");
-//  client.println();
-//  Serial.println(client.read());
-//  uint32_t timeout = millis();
-//  while (client.connected() && millis() - timeout < 10000L) {
-//    while (client.available()) {
-//      char c = client.read();
-//      SerialMon.print(c);
-//      timeout = millis();
-//    }
-//  }
-//  SerialMon.println();
-
-
-  client.println(F("GET /example.json HTTP/1.0"));
-  client.println(F("Host: arduinojson.org"));
-  client.println(F("Connection: close"));
-
-    if (client.println() == 0) {
-      Serial.println(F("Failed to send request"));
-//      client.stop();
-//      return;
-    }
-  
-// // Check HTTP status
-  char status[32] = {0};
-  client.readBytesUntil('\r', status, sizeof(status));
-  if (strcmp(status + 9, "HTTP/1.1 200 OK") != 0) {
-    Serial.print(F("Unexpected response: "));
-    Serial.println(status);
-//    client.stop();
-//    return;
-  }
-  Serial.println(strcmp(status + 9, "HTTP/1.1 200 OK"));
-//
-//
-//    // Skip HTTP headers
-  char endOfHeaders[] = "\r\n\r\n";
-  if (!client.find(endOfHeaders)) {
-    Serial.println(F("Invalid response"));
-//    client.stop();
-//    return;
-  }
-//
-  const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_ARRAY_SIZE(2) + 60;
-  DynamicJsonDocument doc(capacity);
-  Serial.println(capacity);
-  // Parse JSON object
-  DeserializationError error = deserializeJson(doc, client);
-  if (error) {
-    Serial.print(F("deserializeJson() failed: "));
-    Serial.println(error.f_str());
-//    client.stop();
-//    return;
-  }
-  Serial.println(F("Response:"));
-  Serial.println(doc["sensor"].as<const char*>());
-  Serial.println(doc["time"].as<long>());
-  Serial.println(doc["data"][0].as<float>(), 6);
-  Serial.println(doc["data"][1].as<float>(), 6);
-
-//  Serial.println(doc);
-    
   client.stop();
   SerialMon.println(F("Server disconnected"));
-    
 }
+
 void enviar_punto(String imei, float latitud, float longitud, float velocidad, float altura){
   SerialMon.print("Connecting to ");
   SerialMon.println(server);
